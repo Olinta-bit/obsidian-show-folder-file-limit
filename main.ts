@@ -1,134 +1,210 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+const { Plugin, Setting, PluginSettingTab } = require("obsidian");
 
-// Remember to rename these classes and interfaces!
+module.exports = class FolderFileLimitPlugin extends Plugin {
+    DEFAULT_SETTINGS = {
+        fileLimit: 5,
+    };
 
-interface MyPluginSettings {
-	mySetting: string;
+    async onload() {
+        console.log("Folder File Limit Plugin loaded.");
+
+        // 加载用户设置
+        this.settings = Object.assign({}, this.DEFAULT_SETTINGS, await this.loadData());
+
+        // 添加设置界面
+        this.addSettingTab(new FileLimitSettingTab(this.app, this));
+
+        // 确保文件树加载完成后执行逻辑
+        this.app.workspace.onLayoutReady(() => {
+            this.initializeFileTreeObserver();
+        });
+    }
+
+    initializeFileTreeObserver() {
+        // 获取文件树容器 // Get the file tree container
+        const fileTree = document.querySelector(".nav-files-container");
+
+        if (!fileTree) {
+            console.warn("File list not found // 未找到文件列表");
+            return;
+        }
+
+        // 使用 MutationObserver 监控文件树变化
+        // Use MutationObserver to monitor changes in the file tree
+        const observer = new MutationObserver(() => {
+            // 暂时断开观察器 
+            // Temporarily disconnect the observer
+            observer.disconnect();
+            this.limitFilesInFolders();
+            // 修改完成后重新启动观察器 
+            // Restart the observer after modifications
+            observer.observe(fileTree, {
+                childList: true,
+                subtree: true,
+            });
+        });
+
+        observer.observe(fileTree, {
+            childList: true,
+            subtree: true,
+        });
+    }
+
+    limitFilesInFolders() {
+        // 获取所有已经展开的文件夹 
+        // Get all expanded folders
+        const folders = document.querySelectorAll(".tree-item.nav-folder:not(.is-collapsed) .nav-folder-children");
+
+        folders.forEach((folder) => {
+            // 跳过已完全展开的文件夹（带有标记的） 
+            // Skip folders that are already fully expanded (marked with a flag)
+            if (folder.dataset.expanded === "true") return;
+
+            const files = folder.querySelectorAll(":scope > .nav-file");
+            const existingButtonContainer = folder.querySelector(".file-limit-button-container");
+
+            // 如果文件数小于等于 5，移除按钮并标记为已处理 
+            // If the number of files is less than or equal to 5, remove the buttons and mark as processed
+            if (files.length <= this.settings.fileLimit) {
+                if (existingButtonContainer) existingButtonContainer.remove();
+                folder.dataset.expanded = "true";
+                return;
+            }
+
+            // 显示前 5 个文件，隐藏其余文件 
+            // Show the first 5 files and hide the rest
+            files.forEach((file, index) => {
+                file.style.display = index < this.settings.fileLimit ? "" : "none";
+            });
+
+            // 如果已有按钮，跳过创建 
+            // Skip creating buttons if they already exist
+            if (existingButtonContainer) return;
+
+            // 创建“显示更多”按钮 
+            // Create the "Show More" button
+            const showMoreButton = new Button({
+                className: "show-more-button",
+                svg: `
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path fill="currentColor" d="M12 14.975q-.2 0-.375-.062T11.3 14.7l-4.6-4.6q-.275-.275-.275-.7t.275-.7t.7-.275t.7.275l3.9 3.9l3.9-3.9q.275-.275.7-.275t.7.275t.275.7t-.275.7l-4.6 4.6q-.15.15-.325.213t-.375.062"/></svg>
+                `,
+                onClick: () => {
+                    files.forEach((file) => {
+                        file.style.display = "";
+                    });
+                    folder.dataset.expanded = "true";
+                    buttonContainer.remove();
+                    // 强制触发 DOM 更新，避免 MutationObserver 误触发
+                    folder.dispatchEvent(new Event("DOMSubtreeModified"));
+
+                    setTimeout(() => folder.dataset.expanded = "", 500);
+                },
+            }).generate();
+
+            // 创建“永久展开”按钮 
+            // Create the "Permanent Expand" button
+            const permanentExpandButton = new Button({
+                className: "permanent-expand-button",
+                svg: `
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"><path fill="currentColor" d="m12 16.175l3.9-3.875q.275-.275.688-.288t.712.288q.275.275.275.7t-.275.7l-4.6 4.6q-.15.15-.325.213t-.375.062t-.375-.062t-.325-.213l-4.6-4.6q-.275-.275-.288-.687T6.7 12.3q.275-.275.7-.275t.7.275zm0-6L15.9 6.3q.275-.275.688-.287t.712.287q.275.275.275.7t-.275.7l-4.6 4.6q-.15.15-.325.213t-.375.062t-.375-.062t-.325-.213L6.7 7.7q-.275-.275-.288-.687T6.7 6.3q.275-.275.7-.275t.7.275z"/></svg>
+                `,
+                onClick: () => {
+                    files.forEach((file) => {
+                        file.style.display = "";
+                    });
+                    // 标记为永久展开 
+                    // Mark as permanently expanded
+                    folder.dataset.expanded = "true";
+                    buttonContainer.remove();
+                },
+            }).generate();
+
+            // 创建按钮容器 
+            // Create a button container
+            const buttonContainer = new ButtonContainer({ showMoreButton, permanentExpandButton }).generate();
+
+            // 将容器添加到文件夹 
+            // Append the container to the folder
+            folder.appendChild(buttonContainer);
+        });
+    }
+
+    async saveSettings() {
+        await this.saveData(this.settings);
+    }
+
+    onunload() {
+        console.log("Folder File Limit Plugin unloaded.");
+    }
+};
+
+class Button {
+    constructor({ className, svg, onClick }) {
+        this.className = className;
+        this.svg = svg;
+        this.onClick = onClick;
+    }
+
+    generate() {
+        const button = document.createElement("div");
+        button.classList.add(this.className);
+        button.innerHTML = this.svg;
+        button.style.display = "inline-flex";
+        button.style.margin = "0 7px";
+        button.style.cursor = "pointer";
+        button.addEventListener("click", this.onClick);
+        return button;
+    }
 }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
+class ButtonContainer {
+    constructor({ showMoreButton, permanentExpandButton }) {
+        this.showMoreButton = showMoreButton;
+        this.permanentExpandButton = permanentExpandButton;
+    }
+
+    generate() {
+        const buttonContainer = document.createElement("div");
+        buttonContainer.classList.add("file-limit-button-container");
+        buttonContainer.style.display = "flex";
+        buttonContainer.style.justifyContent = "center";
+
+        buttonContainer.appendChild(this.showMoreButton);
+        buttonContainer.appendChild(this.permanentExpandButton);
+        return buttonContainer;
+    }
 }
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+class FileLimitSettingTab extends PluginSettingTab {
+    constructor(app, plugin) {
+        super(app, plugin);
+        this.plugin = plugin;
+    }
 
-	async onload() {
-		await this.loadSettings();
+    display() {
+        const { containerEl } = this;
+        containerEl.empty();
 
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
+        containerEl.createEl("h2", { text: "Folder File Limit Settings" });
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
+        new Setting(containerEl)
+            .setName("File Limit")
+            .setDesc("Set the maximum number of files to show in expanded folders.")
+            .addText((text) =>
+                text
+                    .setPlaceholder("Enter a number")
+                    .setValue(this.plugin.settings.fileLimit.toString())
+                    .onChange(async (value) => {
+                        if (value.trim() === "") return;
 
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			}
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-	}
-
-	onunload() {
-
-	}
-
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-	}
-
-	async saveSettings() {
-		await this.saveData(this.settings);
-	}
-}
-
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
-}
-
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
-
-	constructor(app: App, plugin: MyPlugin) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
-
-	display(): void {
-		const {containerEl} = this;
-
-		containerEl.empty();
-
-		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
-				}));
-	}
+                        const parsedValue = parseInt(value, 10);
+                        if (!isNaN(parsedValue) && parsedValue > 0) {
+                            this.plugin.settings.fileLimit = parsedValue;
+                            await this.plugin.saveSettings();
+                        } else {
+                            console.warn("Invalid file limit value");
+                        }
+                    })
+            );
+    }
 }
