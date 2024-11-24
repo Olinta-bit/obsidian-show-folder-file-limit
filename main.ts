@@ -1,27 +1,29 @@
-const { Plugin, Setting, PluginSettingTab } = require("obsidian");
+import { Plugin, Setting, PluginSettingTab, App } from "obsidian";
 
-module.exports = class FolderFileLimitPlugin extends Plugin {
-    DEFAULT_SETTINGS = {
-        fileLimit: 5,
-    };
+interface MyPluginSettings {
+    fileLimit: number;
+}
+const DEFAULT_SETTINGS: MyPluginSettings = {
+	fileLimit: 5,
+}
+export default class FolderFileLimitPlugin extends Plugin {
+    settings: MyPluginSettings;
 
     async onload() {
         console.log("Folder File Limit Plugin loaded.");
 
-        // 加载用户设置
-        this.settings = Object.assign({}, this.DEFAULT_SETTINGS, await this.loadData());
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 
-        // 添加设置界面
         this.addSettingTab(new FileLimitSettingTab(this.app, this));
 
-        // 确保文件树加载完成后执行逻辑
         this.app.workspace.onLayoutReady(() => {
             this.initializeFileTreeObserver();
         });
     }
 
     initializeFileTreeObserver() {
-        // 获取文件树容器 // Get the file tree container
+        // 获取文件树容器 
+        // Get the file tree container
         const fileTree = document.querySelector(".nav-files-container");
 
         if (!fileTree) {
@@ -58,16 +60,16 @@ module.exports = class FolderFileLimitPlugin extends Plugin {
         folders.forEach((folder) => {
             // 跳过已完全展开的文件夹（带有标记的） 
             // Skip folders that are already fully expanded (marked with a flag)
-            if (folder.dataset.expanded === "true") return;
+            if (folder.classList.contains("folders-fully-expanded")) return;
 
-            const files = folder.querySelectorAll(":scope > .nav-file");
+            const files = Array.from(folder.querySelectorAll(":scope > .nav-file") as unknown as HTMLElement[]);
             const existingButtonContainer = folder.querySelector(".file-limit-button-container");
 
             // 如果文件数小于等于 5，移除按钮并标记为已处理 
             // If the number of files is less than or equal to 5, remove the buttons and mark as processed
             if (files.length <= this.settings.fileLimit) {
                 if (existingButtonContainer) existingButtonContainer.remove();
-                folder.dataset.expanded = "true";
+                folder.classList.add("folders-fully-expanded");
                 return;
             }
 
@@ -92,12 +94,12 @@ module.exports = class FolderFileLimitPlugin extends Plugin {
                     files.forEach((file) => {
                         file.style.display = "";
                     });
-                    folder.dataset.expanded = "true";
+                    folder.classList.add("folders-fully-expanded");
                     buttonContainer.remove();
                     // 强制触发 DOM 更新，避免 MutationObserver 误触发
                     folder.dispatchEvent(new Event("DOMSubtreeModified"));
 
-                    setTimeout(() => folder.dataset.expanded = "", 500);
+                    setTimeout(() => folder.classList.remove("folders-fully-expanded"), 500);
                 },
             }).generate();
 
@@ -114,7 +116,7 @@ module.exports = class FolderFileLimitPlugin extends Plugin {
                     });
                     // 标记为永久展开 
                     // Mark as permanently expanded
-                    folder.dataset.expanded = "true";
+                    folder.classList.add("folders-fully-expanded");
                     buttonContainer.remove();
                 },
             }).generate();
@@ -139,7 +141,10 @@ module.exports = class FolderFileLimitPlugin extends Plugin {
 };
 
 class Button {
-    constructor({ className, svg, onClick }) {
+    className: string;
+    svg: string;
+    onClick: Function;
+    constructor({ className, svg, onClick }: { className: string, svg: string, onClick: Function }) {
         this.className = className;
         this.svg = svg;
         this.onClick = onClick;
@@ -152,13 +157,15 @@ class Button {
         button.style.display = "inline-flex";
         button.style.margin = "0 7px";
         button.style.cursor = "pointer";
-        button.addEventListener("click", this.onClick);
+        button.addEventListener("click", this.onClick as any);
         return button;
     }
 }
 
 class ButtonContainer {
-    constructor({ showMoreButton, permanentExpandButton }) {
+    showMoreButton: HTMLDivElement;
+    permanentExpandButton: HTMLDivElement;
+    constructor({ showMoreButton, permanentExpandButton }: { showMoreButton: HTMLDivElement, permanentExpandButton: HTMLDivElement }) {
         this.showMoreButton = showMoreButton;
         this.permanentExpandButton = permanentExpandButton;
     }
@@ -176,7 +183,8 @@ class ButtonContainer {
 }
 
 class FileLimitSettingTab extends PluginSettingTab {
-    constructor(app, plugin) {
+    plugin: FolderFileLimitPlugin;
+    constructor(app: App, plugin: FolderFileLimitPlugin) {
         super(app, plugin);
         this.plugin = plugin;
     }
